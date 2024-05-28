@@ -1,5 +1,5 @@
-import {useState, useEffect} from "react";
-import {ethers} from "ethers";
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
 import atm_abi from "../artifacts/contracts/Assessment.sol/Assessment.json";
 
 export default function HomePage() {
@@ -7,111 +7,166 @@ export default function HomePage() {
   const [account, setAccount] = useState(undefined);
   const [atm, setATM] = useState(undefined);
   const [balance, setBalance] = useState(undefined);
+  const [transactionHistory, setTransactionHistory] = useState([]);
+  const [showBalance, setShowBalance] = useState(true);
+  const [showTransactionHistory, setShowTransactionHistory] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
 
-  const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Update with actual address
   const atmABI = atm_abi.abi;
 
-  const getWallet = async() => {
+  const getWallet = async () => {
     if (window.ethereum) {
-      setEthWallet(window.ethereum);
+      setEthWallet(new ethers.providers.Web3Provider(window.ethereum));
     }
-
-    if (ethWallet) {
-      const account = await ethWallet.request({method: "eth_accounts"});
-      handleAccount(account);
-    }
-  }
-
-  const handleAccount = (account) => {
-    if (account) {
-      console.log ("Account connected: ", account);
-      setAccount(account);
-    }
-    else {
-      console.log("No account found");
-    }
-  }
-
-  const connectAccount = async() => {
-    if (!ethWallet) {
-      alert('MetaMask wallet is required to connect');
-      return;
-    }
-  
-    const accounts = await ethWallet.request({ method: 'eth_requestAccounts' });
-    handleAccount(accounts);
-    
-    // once wallet is set we can get a reference to our deployed contract
-    getATMContract();
   };
 
-  const getATMContract = () => {
-    const provider = new ethers.providers.Web3Provider(ethWallet);
-    const signer = provider.getSigner();
-    const atmContract = new ethers.Contract(contractAddress, atmABI, signer);
- 
-    setATM(atmContract);
-  }
-
-  const getBalance = async() => {
-    if (atm) {
-      setBalance((await atm.getBalance()).toNumber());
+  const handleAccount = async () => {
+    if (ethWallet) {
+      const accounts = await ethWallet.listAccounts();
+      if (accounts.length > 0) {
+        console.log("Account connected: ", accounts[0]);
+        setAccount(accounts[0]);
+        getATMContract();
+      } else {
+        console.log("No account found");
+      }
     }
-  }
+  };
 
-  const deposit = async() => {
+  const connectAccount = async () => {
+    try {
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      handleAccount();
+    } catch (error) {
+      console.error("Error connecting account:", error);
+    }
+  };
+
+  const getATMContract = async () => {
+    const network = await ethWallet.getNetwork();
+    console.log("Network:", network);
+    if (network.chainId === 1337 || network.chainId === 31337) {
+      // Localhost or Hardhat network
+      const signer = ethWallet.getSigner();
+      const atmContract = new ethers.Contract(contractAddress, atmABI, signer);
+      setATM(atmContract);
+    } else {
+      console.error("Unsupported network");
+    }
+  };
+
+  const getBalance = async () => {
     if (atm) {
-      let tx = await atm.deposit(1);
-      await tx.wait()
+      const balance = await atm.getBalance();
+      setBalance(balance.toNumber());
+      console.log("Balance fetched: ", balance.toNumber());
+    }
+  };
+
+  const executeTransaction = async (transaction) => {
+    try {
+      const receipt = await transaction.wait();
+      console.log("Transaction hash:", receipt.transactionHash);
+      console.log("Gas used:", receipt.gasUsed.toString());
+      console.log("Block number:", receipt.blockNumber);
+      console.log("Confirmations:", receipt.confirmations);
       getBalance();
+      // Add transaction to history
+      setTransactionHistory([...transactionHistory, receipt]);
+    } catch (error) {
+      console.error("Transaction error:", error);
     }
-  }
+  };
 
-  const withdraw = async() => {
+  const deposit = async () => {
     if (atm) {
-      let tx = await atm.withdraw(1);
-      await tx.wait()
-      getBalance();
+      const tx = await atm.deposit(1000);
+      executeTransaction(tx);
     }
-  }
+  };
+
+  const withdraw = async () => {
+    if (atm) {
+      const tx = await atm.withdraw(500);
+      executeTransaction(tx);
+    }
+  };
+
+  const toggleBalanceVisibility = () => {
+    setShowBalance(!showBalance);
+  };
+
+  const toggleTransactionHistoryVisibility = () => {
+    setShowTransactionHistory(!showTransactionHistory);
+  };
+
+  const showTransaction = (transaction) => {
+    setSelectedTransaction(transaction);
+  };
 
   const initUser = () => {
-    // Check to see if user has Metamask
     if (!ethWallet) {
-      return <p>Please install Metamask in order to use this ATM.</p>
+      return <p>Please install Metamask in order to use this ATM.</p>;
     }
 
-    // Check to see if user is connected. If not, connect to their account
     if (!account) {
-      return <button onClick={connectAccount}>Please connect your Metamask wallet</button>
+      return <button onClick={connectAccount}>Please connect your Metamask wallet</button>;
     }
 
-    if (balance == undefined) {
+    if (showBalance && balance === undefined) {
       getBalance();
     }
 
     return (
       <div>
         <p>Your Account: {account}</p>
-        <p>Your Balance: {balance}</p>
-        <button onClick={deposit}>Deposit 1 ETH</button>
-        <button onClick={withdraw}>Withdraw 1 ETH</button>
+        {showBalance && <p>Your Balance: {balance}</p>}
+        <button onClick={deposit}>Deposit 1000</button>
+        <button onClick={withdraw}>Withdraw 500 ETH</button>
+        <button onClick={toggleBalanceVisibility}>{showBalance ? 'Hide Balance' : 'Show Balance'}</button>
+        <button onClick={toggleTransactionHistoryVisibility}>
+          {showTransactionHistory ? 'Hide Transaction History' : 'Show Transaction History'}
+        </button>
+        {showTransactionHistory && (
+          <>
+            <h2>Transaction Receipt</h2>
+            <ul>
+              {transactionHistory.map((tx, index) => (
+                <li key={index} onClick={() => showTransaction(tx)}>
+                  Transaction Hash: {tx.transactionHash}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
-    )
-  }
+    );
+  };
 
-  useEffect(() => {getWallet();}, []);
+  useEffect(() => {
+    getWallet();
+  }, []);
 
   return (
     <main className="container">
-      <header><h1>Welcome to the Metacrafters ATM!</h1></header>
+      <header>
+        <h1>WELCOME TO MY BANK ACCOUNT</h1>
+      </header>
       {initUser()}
+      {selectedTransaction && (
+        <div>
+          <h3>Transaction Details</h3>
+          <p>Transaction Hash: {selectedTransaction.transactionHash}</p>
+          {/* Add more details if needed */}
+          <button onClick={() => setSelectedTransaction(null)}>Close</button>
+        </div>
+      )}
       <style jsx>{`
         .container {
-          text-align: center
+          text-align: center;
         }
-      `}
-      </style>
+      `}</style>
     </main>
-  )
+  );
 }
